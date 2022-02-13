@@ -1,0 +1,258 @@
+Map.setCenter(-72.848527,-37.304814 , 9);
+//var superficie= geometry.area().divide(10000)
+var sgt = {};
+var imgRaw;
+var imgId;
+var imgDate;
+var delta_ndii;
+var bf_imgButton;
+var vectors; 
+var url_feature;
+Map.setOptions('HYBRID');
+var predstyle={color: 'yellow', fillColor: '00000000'}
+var PIRAstyle={color: 'FF000010'}
+var vizfalsoColor = {
+  bands: ['B8', 'B4', 'B3'],
+  min: 0,
+  max: 4500,
+  gamma: [0.95, 1.1, 1]
+};
+var viz_ndiiReclass_raster={palette : 'yellow'}
+var viz_ndiiReclass_vector={color : 'white'}
+var viz_deltandii={
+  min:0,
+  max:0.5,
+  palette:["008000","ff0000"]
+  
+}
+var naturalColor={
+  bands:['B4','B3','B2'],
+  min:250,
+  max:2000,
+}
+
+sgt.createPanels = function(){
+  sgt.intro = {
+    panel: ui.Panel([
+      ui.Label({
+        value: 'Sistema de Seguridad Patrimonial',
+        style: {fontWeight: 'bold', fontSize: '16px', margin: '10px 5px'}
+        }),
+      ])
+  };
+  sgt.filters={
+    codigo: ui.Textbox('20071'),
+    applyButton: ui.Button('Seleccionar', function(){
+    
+    var predios=ee.FeatureCollection('projects/seguridad-1555430161746/assets/PREDIOS')
+    .filter(ee.Filter.stringContains("CODGO", sgt.filters.codigo.getValue())); 
+    Map.centerObject(predios);
+    Map.addLayer(predios.style(predstyle), {}, sgt.filters.codigo.getValue());
+    }),
+    clean: ui.Button('Borrar',function(){
+    Map.clear()
+    Map.setOptions('HYBRID');
+    })
+    
+  };
+  
+  sgt.filters.panel= ui.Panel({
+    widgets:[
+      ui.Label('Código de Predio',{fontWeight: 'bold',fontSize: '12px'}), 
+      sgt.filters.codigo, sgt.filters.applyButton,sgt.filters.clean
+      ]
+  })
+}
+
+/*se define un cuadro para el rango de fechas en que buscará las imagenes satelitales*/
+
+sgt.rangofechas= function(){
+  sgt.fech={
+    date1:ui.Textbox({
+      value:'2021-06-01',placeholder:'YYYY-MM-DD'
+    }),
+    date2:ui.Textbox({
+      value:new Date(Date.now()).toJSON().slice(0,10),placeholder:'YYYY-MM-DD'
+    }),
+    busca:ui.Button({
+      label:'Buscar Imagen',
+      style:{color:'red'},
+      onClick:function(){
+        var bandsNames =ee.List(['B2','B3','B4','B6','B8','B8A','B11','QA60']);
+        var st2 = ee.ImageCollection('COPERNICUS/S2')
+        .filterDate(sgt.fech.date1.getValue(), sgt.fech.date2.getValue())
+        .filterBounds(ee.FeatureCollection('projects/seguridad-1555430161746/assets/PREDIOS')
+        .filter(ee.Filter.stringContains("CODGO", sgt.filters.codigo.getValue())))
+        .filter(ee.Filter.gte('system:asset_size', 1e9))
+        .select(bandsNames)
+        .map(function(image) {
+          image = image.addBands(image.metadata('CLOUD_COVERAGE_ASSESSMENT').rename('Nubosidad'));
+          image = image.addBands(image.normalizedDifference(['B8', 'B4']).rename('NDII'));
+          image = image.addBands(image.normalizedDifference(['B3', 'B11']).rename('NDSI'));
+          return image;
+    })
+        var center = Map.getCenter();
+        var chart = ui.Chart.image.series({
+          imageCollection: st2.select('Nubosidad'),
+          region:center,
+          scale: 400,
+        });
+        chart.style().set({
+          width: '300px',
+          height: '250px',
+        });  
+        chart.setOptions({
+          title: 'Serie temporal de imágenes el Predio - ' + sgt.filters.codigo.getValue(), 
+          pointSize: 5,
+          vAxis: {title: 'Nubosidad (%)'},
+          legend: {position: 'none'},
+          hAxis: {title: 'Fecha de captura'}
+        });
+        var graph_panel= ui.Panel({
+          style:{
+            position:'top-right'
+          }
+        })
+        Map.add(graph_panel)
+        graph_panel.add(chart)
+        var label = ui.Label('Seleccionar una fecha en el gráfico para desplegar imagen');
+        Map.add(label)
+        
+        chart.onClick(function(xValue,yValue,seriesName){
+          if(!xValue) return
+          var pred= ee.FeatureCollection('projects/seguridad-1555430161746/assets/PREDIOS')
+          .filter(ee.Filter.stringContains("CODGO", sgt.filters.codigo.getValue()))
+          var equalDate= ee.Filter.equals('system:time_start',xValue);
+          var image=ee.Image(st2
+          .filter(equalDate)
+          .first())
+          var s2layer=ui.Map.Layer(image.clip(pred),naturalColor);
+          Map.layers().reset([s2layer])
+          
+          label.setValue((new Date(xValue)).toUTCString());
+          
+          var label2 = label;
+          var azi = ee.Number(image.get('MEAN_SOLAR_AZIMUTH_ANGLE'));
+          var elv = ee.Number(image.get('MEAN_SOLAR_ZENITH_ANGLE'));
+          var shadow = ee.Terrain.hillshade('USGS/SRTMGL1_003', azi, elv);
+          imgRaw = image;
+          imgId = image.id().getInfo();
+          imgDate = (new Date(xValue)).toJSON().slice(0,10);
+
+        })
+
+      }
+
+    })
+    
+  }
+  sgt.fech.panel=ui.Panel({
+    widgets:[
+      ui.Label('Rango de Fechas',{fontWeight:'bold',fontSize:'12px'}),
+      sgt.fech.date1,sgt.fech.date2, sgt.fech.busca
+      ]
+  })
+  
+sgt.APL={
+    Ano: ui.Textbox('2015'),
+    applyButton: ui.Button('Seleccionar', function(){
+    var APL_a=sgt.APL.Ano.getValue()
+    })
+  };
+  
+  sgt.APL.panel= ui.Panel({
+    widgets:[
+      ui.Label('APL desde',{fontWeight: 'bold',fontSize: '12px'}), 
+      sgt.APL.Ano, sgt.APL.applyButton
+      ]
+  })
+
+  
+  sgt.detect=ui.Button({
+    label:'Cálculo de diferencias',
+    onClick: function(){
+      Map.clear()
+      Map.setOptions('HYBRID');
+      var t1=imgRaw;
+      function clean(image){
+        image = image.updateMask(image.select(['QA60']).lt(1024));
+        image = image.select(['NDII']);
+        return image;
+      }
+      
+      var pre= ee.FeatureCollection('projects/seguridad-1555430161746/assets/PREDIOS')
+      .filter(ee.Filter.stringContains("CODGO", sgt.filters.codigo.getValue()))
+      //var ano=new Date(Date.now()).toJSON().slice(0,10),placeholder:'YYYY'
+      var ano_select=ee.Number.parse(sgt.APL.Ano.getValue())
+      var uso_SIP=ee.FeatureCollection('projects/seguridad-1555430161746/assets/USO_0721')
+      .filter(ee.Filter.eq("CODIGO", ee.Number.parse(sgt.filters.codigo.getValue())))
+      .filter(ee.Filter.rangeContains("APL",1, ano_select));
+      // Make an image out of the land area attribute.
+      var ndii0 = uso_SIP
+      .filter(ee.Filter.notNull(['NDVI']))
+      .reduceToImage({
+          properties: ['NDVI'],
+          reducer: ee.Reducer.first()
+      });
+      //var ndii0=ee.Image('users/raulperezastorga/USO_APL_NDII')
+      var ndii1= clean(t1)
+      var delta_ndii=ndii0.subtract(ndii1)
+      var zones= delta_ndii.gte(0.15)
+      zones = zones.updateMask(zones.neq(0))
+      var vectors = zones.reduceToVectors({
+        geometry: pre,
+        crs: 'EPSG:4326',
+        scale: 10,
+        geometryType: 'polygon',
+        eightConnected: true,
+        labelProperty: 'zone',
+        bestEffort: false,
+        maxPixels: 9e10,
+
+    });
+    
+      Map.addLayer(t1.clip(pre),naturalColor,'RGB')
+      Map.addLayer(delta_ndii.clip(pre), viz_deltandii,'Cambios')
+      Map.addLayer(vectors, viz_ndiiReclass_vector,'Diferencias')
+      var boundary=pre.geometry()
+      var region1 = ee.Geometry(boundary.getInfo()).toGeoJSONString();
+      var desc=ee.FeatureCollection(vectors.toList(vectors.size()))
+      //agrega enlace para descarga en kmz
+      
+      var url_feature=desc.getDownloadURL({
+        format: "kmz",
+        filename: sgt.filters.codigo.getValue()+" "+imgDate
+      })
+       // Add UI elements to the Map.
+      var urlLabel = ui.Label('kmz', {shown: true}).setUrl(url_feature);
+      var panel = ui.Panel([urlLabel]);
+      Map.add(panel);
+      print ("imprimir", url_feature)
+    }
+  })
+}
+
+
+
+sgt.boot = function(){
+  sgt.createPanels();
+  sgt.rangofechas();
+  var main = ui.Panel({
+    widgets: [
+      sgt.intro.panel,
+      sgt.filters.panel,
+      sgt.fech.panel,
+      sgt.APL.panel,
+      sgt.detect
+      ],
+    style:{width:'200px', padding:'1px', backgroundColor: 'BFB800'}
+  });
+
+
+
+ui.root.insert(0, main);
+
+};
+
+
+sgt.boot();
